@@ -1,18 +1,22 @@
 package main
 
 import (
-    "context"
-    "log"
-    "net/http"
-    "os"
-    "time"
+	"log"
+	"net/http"
+	"os"
 
-    "github.com/joho/godotenv"
-    "go.mongodb.org/mongo-driver/mongo"
-    "go.mongodb.org/mongo-driver/mongo/options"
-    "go.mongodb.org/mongo-driver/mongo/readpref"
+	"github.com/joho/godotenv"
+	"github.com/rs/cors"
+	"go.mongodb.org/mongo-driver/mongo"
 
-    "trivTunes-backend/handlers"  // Import the handlers package
+	"context"
+
+	"time"
+
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
+
+	"trivTunes-backend/handlers" // Import the handlers package
 )
 
 var client *mongo.Client
@@ -49,10 +53,26 @@ func init() {
     // Initialize the user collection in MongoDB
     handlers.InitUserCollection(client)
 }
-
 func main() {
-    // Start HTTP server
-    http.HandleFunc("/api/user", handlers.UserHandler)  // Use the imported UserHandler
-    log.Println("Starting server on :8080...")
-    log.Fatal(http.ListenAndServe(":8080", nil))
+	if err := godotenv.Load(); err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	allowedOrigin := os.Getenv("TRIVTUNES_CLIENT_URI")
+	if allowedOrigin == "" {
+		log.Fatal("TRIVTUNES_CLIENT_URI is not set in .env file")
+	}
+
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{allowedOrigin},
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders:   []string{"Content-Type"},
+		AllowCredentials: true,
+	})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/user", handlers.UserHandler)
+	handler := c.Handler(mux)
+	log.Println("Starting server on :8080...")
+	log.Fatal(http.ListenAndServe(":8080", handler))
 }

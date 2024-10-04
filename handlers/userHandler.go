@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -18,6 +19,7 @@ type User struct {
     Email string `json:"email"`
     Score int32 `json:"score"`
 }
+
 
 var userCollection *mongo.Collection
 
@@ -46,35 +48,14 @@ func InitUserCollection(client *mongo.Client) {
 
 // UserHandler handles both GET and POST requests
 func UserHandler(w http.ResponseWriter, r *http.Request) {
-    // Enable CORS
-    allowedOrigins := []string{"https://www.trivtunes.com", "https://trivtunes.com", "http://localhost:3000"}
-    origin := r.Header.Get("Origin")
-
-    for _, allowedOrigin := range allowedOrigins {
-        if origin == allowedOrigin {
-            w.Header().Set("Access-Control-Allow-Origin", origin)
-            break
-        }
-    }
-    w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-    w.Header().Set("Access-Control-Allow-Credentials", "true")
-
-    // Handle preflight requests
-    if r.Method == http.MethodOptions {
-        w.WriteHeader(http.StatusOK)
-        return
-    }
-
-    // Handle different HTTP methods
-    switch r.Method {
-    case http.MethodGet:
-        handleGetUsers(w, r) // Handle GET
-    case http.MethodPost:
-        handlePostUser(w, r) // Handle POST
-    default:
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-    }
+	switch r.Method {
+	case http.MethodGet:
+		handleGetUsers(w, r)
+	case http.MethodPost:
+		handlePostUser(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // Handle GET request to retrieve the top 50 users with the highest score from MongoDB
