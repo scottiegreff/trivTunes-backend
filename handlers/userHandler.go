@@ -47,9 +47,23 @@ func InitUserCollection(client *mongo.Client) {
 // UserHandler handles both GET and POST requests
 func UserHandler(w http.ResponseWriter, r *http.Request) {
     // Enable CORS
-    w.Header().Set("Access-Control-Allow-Origin", "https://trivTunes.com")
+    allowedOrigins := []string{"https://www.trivtunes.com", "https://trivtunes.com","http://localhost:3000"}
+    origin := r.Header.Get("Origin")
+    for _, allowedOrigin := range allowedOrigins {
+    if origin == allowedOrigin {
+        w.Header().Set("Access-Control-Allow-Origin", origin)
+        break
+    }
+}
     w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
     w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+    w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+    // Handle preflight requests
+    if r.Method == http.MethodOptions {
+        w.WriteHeader(http.StatusOK)
+        return
+    }
 
     // Handle different HTTP methods
     switch r.Method {
