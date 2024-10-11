@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
 	"log"
 	"net/http"
 
@@ -50,12 +49,54 @@ func InitUserCollection(client *mongo.Client) {
 func UserHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		handleGetUsers(w, r)
+		// Check if we're fetching a single user or multiple users
+		if email := r.URL.Query().Get("email"); email != "" {
+			handleGetUser(w, r)
+		} else {
+			handleGetUsers(w, r)
+		}
 	case http.MethodPost:
 		handlePostUser(w, r)
+    case http.MethodPatch:
+		handleUpdateUserScore(w, r)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+func handleGetUser(w http.ResponseWriter, r *http.Request) {
+    // Get the email from the query parameters
+    email := r.URL.Query().Get("email")
+    if email == "" {
+        http.Error(w, "Email is required", http.StatusBadRequest)
+        return
+    }
+    
+    // Create a context with a timeout
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+    
+    // Assume userCollection is your MongoDB collection for users
+    var user User
+    err := userCollection.FindOne(ctx, bson.M{"email": email}).Decode(&user)
+    if err != nil {
+        if err == mongo.ErrNoDocuments {
+            w.WriteHeader(http.StatusNotFound)
+            json.NewEncoder(w).Encode(map[string]string{"message": "User not found"})
+        } else {
+            log.Printf("Error fetching user: %v", err)
+            http.Error(w, "Internal server error", http.StatusInternalServerError)
+        }
+        return
+    }
+
+    // Set the content type to JSON
+    w.Header().Set("Content-Type", "application/json")
+
+    // Encode the user to JSON and send the response
+    if err := json.NewEncoder(w).Encode(user); err != nil {
+        log.Printf("Error encoding user to JSON: %v", err)
+        http.Error(w, "Error encoding response", http.StatusInternalServerError)
+    }
 }
 
 // Handle GET request to retrieve the top 50 users with the highest score from MongoDB
@@ -102,40 +143,87 @@ func handleGetUsers(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(users)
 }
 
-
-// Handle POST request to create a new user
 func handlePostUser(w http.ResponseWriter, r *http.Request) {
     var newUser User
 
-    // Read the request body
-    body, err := ioutil.ReadAll(r.Body)
-    if err != nil {
-        http.Error(w, "Unable to read request body", http.StatusBadRequest)
-        return
-    }
-
-    // Unmarshal JSON to User struct
-    if err := json.Unmarshal(body, &newUser); err != nil {
+    // Read and parse the JSON body
+    if err := json.NewDecoder(r.Body).Decode(&newUser); err != nil {
         http.Error(w, "Invalid JSON format", http.StatusBadRequest)
         return
     }
 
-    // Insert new user into MongoDB
+    // Create context with timeout
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
 
-    _, err = userCollection.InsertOne(ctx, bson.M{
-        "name":  newUser.Name,
-        "email": newUser.Email,
-        "score": newUser.Score,
-    })
+    // Check if user already exists
+    var existingUser User
+    err := userCollection.FindOne(ctx, bson.M{"email": newUser.Email}).Decode(&existingUser)
+
+    if err == nil {
+        // User already exists, return the existing user
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(existingUser)
+        return
+    } else if err != mongo.ErrNoDocuments {
+        // An error occurred that wasn't "document not found"
+        log.Println("Error checking for existing user:", err)
+        http.Error(w, "Database error", http.StatusInternalServerError)
+        return
+    }
+
+    // User doesn't exist, insert new user into MongoDB
+    _, err = userCollection.InsertOne(ctx, newUser)
     if err != nil {
         log.Println("Error inserting user into MongoDB:", err)
         http.Error(w, "Database error", http.StatusInternalServerError)
         return
     }
 
-    // Respond with success message
+    // Respond with the newly created user
     w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(map[string]string{"message": "User created successfully"})
+    w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(newUser)
 }
+
+func handleUpdateUserScore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var updateReq User
+
+	// Read and parse the JSON body
+	if err := json.NewDecoder(r.Body).Decode(&updateReq); err != nil {
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		return
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Find the user and update their score
+	filter := bson.M{"email": updateReq.Email}
+	update := bson.M{"$set": bson.M{"score": updateReq.Score}}
+
+	var updatedUser User
+	err := userCollection.FindOneAndUpdate(ctx, filter, update, options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&updatedUser)
+
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			http.Error(w, "User not found", http.StatusNotFound)
+		} else {
+			log.Println("Error updating user score:", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Respond with the updated user
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(updatedUser)
+}
+

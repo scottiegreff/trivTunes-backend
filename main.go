@@ -54,25 +54,27 @@ func init() {
     handlers.InitUserCollection(client)
 }
 func main() {
-	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env file")
-	}
+    if err := godotenv.Load(); err != nil {
+        log.Fatal("Error loading .env file")
+    }
 
-	allowedOrigin := os.Getenv("TRIVTUNES_CLIENT_URI")
-	if allowedOrigin == "" {
-		log.Fatal("TRIVTUNES_CLIENT_URI is not set in .env file")
-	}
+    allowedOrigin := os.Getenv("TRIVTUNES_CLIENT_URI")
+    if allowedOrigin == "" {
+        log.Fatal("TRIVTUNES_CLIENT_URI is not set in .env file")
+    }
 
-	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{allowedOrigin},
-		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Content-Type"},
-		AllowCredentials: true,
-	})
+    c := cors.New(cors.Options{
+        AllowedOrigins:   []string{allowedOrigin},
+        AllowedMethods:   []string{"GET", "POST", "OPTIONS", "PATCH"},
+        AllowedHeaders:   []string{"Content-Type"},
+        AllowCredentials: true,
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/user", handlers.UserHandler)
-	handler := c.Handler(mux)
-	log.Println("Starting server on :8080...")
-	log.Fatal(http.ListenAndServe(":8080", handler))
+    })
+
+    mux := http.NewServeMux()
+    mux.HandleFunc("/api/user",  handlers.UserHandler)
+
+    handler := c.Handler(mux)
+    log.Println("Starting server on :8080...")
+    log.Fatal(http.ListenAndServe(":8080", handler))
 }
