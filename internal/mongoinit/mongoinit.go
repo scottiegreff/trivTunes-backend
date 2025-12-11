@@ -1,4 +1,4 @@
-package handler
+package mongoinit
 
 import (
 	"context"
@@ -20,8 +20,8 @@ var (
 	initErr  error
 )
 
-// ensureMongo initializes the Mongo client once per cold start and wires the handlers collection.
-func ensureMongo() error {
+// EnsureMongo initializes a shared Mongo client once per cold start and wires handler collections.
+func EnsureMongo() error {
 	initOnce.Do(func() {
 		_ = godotenv.Load()
 		uri := os.Getenv("MONGODB_URI")
