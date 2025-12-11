@@ -7,7 +7,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
-	"trivTunes-backend/handlers"
+	"handler/handlers"
 
 	"context"
 	"time"
