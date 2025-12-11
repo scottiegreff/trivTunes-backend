@@ -7,74 +7,72 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
-	"go.mongodb.org/mongo-driver/mongo"
+	"trivTunes-backend/handlers"
 
 	"context"
-
 	"time"
 
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
-
-	"trivTunes-backend/handlers" // Import the handlers package
 )
 
 var client *mongo.Client
 
-// init function to load .env and setup MongoDB connection
-func init() {
-    // Load environment variables from .env file
-    if err := godotenv.Load(); err != nil {
-        log.Fatal("Error loading .env file")
-    }
-
-    // Get MongoDB URI from environment variables
-    uri := os.Getenv("MONGODB_URI")
-    if uri == "" {
-        log.Fatal("MONGODB_URI is not set in .env file")
-    }
-
-    // Setup MongoDB connection
-    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-    defer cancel()
-
-    var err error
-    client, err = mongo.Connect(ctx, options.Client().ApplyURI(uri))
-    if err != nil {
-        log.Fatal("MongoDB connection error: ", err)
-    }
-
-    // Ping the MongoDB server to check if the connection is alive
-    if err := client.Ping(ctx, readpref.Primary()); err != nil {
-        log.Fatal("MongoDB connection failed: ", err)
-    }
-    log.Println("Successfully connected to MongoDB")
-
-    // Initialize the user collection in MongoDB
-    handlers.InitUserCollection(client)
-}
 func main() {
-    if err := godotenv.Load(); err != nil {
-        log.Fatal("Error loading .env file")
-    }
+	// Load .env file if it exists (for local development)
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found")
+	}
 
-    allowedOrigin := os.Getenv("TRIVTUNES_CLIENT_URI")
-    if allowedOrigin == "" {
-        log.Fatal("TRIVTUNES_CLIENT_URI is not set in .env file")
-    }
+	mongoURI := os.Getenv("MONGODB_URI")
+	if mongoURI == "" {
+		log.Fatal("MONGODB_URI is not set in environment")
+	}
 
-    c := cors.New(cors.Options{
-        AllowedOrigins:   []string{allowedOrigin},
-        AllowedMethods:   []string{"GET", "POST", "OPTIONS", "PATCH"},
-        AllowedHeaders:   []string{"Content-Type"},
-        AllowCredentials: true,
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-    })
+	var err error
+	client, err = mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+	if err != nil {
+		log.Fatal("MongoDB connection error: ", err)
+	}
 
-    mux := http.NewServeMux()
-    mux.HandleFunc("/api/user",  handlers.UserHandler)
+	if err := client.Ping(ctx, readpref.Primary()); err != nil {
+		log.Fatal("MongoDB connection failed: ", err)
+	}
+	log.Println("Connected to MongoDB")
 
-    handler := c.Handler(mux)
-    log.Println("Starting server on :8080...")
-    log.Fatal(http.ListenAndServe(":8080", handler))
+	handlers.InitUserCollection(client)
+
+	clientURI := os.Getenv("TRIVTUNES_CLIENT_URI")
+	// debug, _ := strconv.ParseBool(os.Getenv("DEBUG", "true"))
+
+	allowedOrigin := clientURI
+	if allowedOrigin == "" {
+		allowedOrigin = "http://localhost:5173"
+		log.Println("TRIVTUNES_CLIENT_URI not set, defaulting CORS to", allowedOrigin)
+	}
+
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{allowedOrigin},
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS", "PATCH"},
+		AllowedHeaders:   []string{"Content-Type"},
+		AllowCredentials: true,
+	})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/user", handlers.UserHandler)
+	mux.HandleFunc("/api/leaderboard", handlers.LeaderboardHandler)
+
+	handler := c.Handler(mux)
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	addr := ":" + port
+	log.Println("Starting server on", addr, "with CORS origin", allowedOrigin)
+	log.Fatal(http.ListenAndServe(addr, handler))
 }

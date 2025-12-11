@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -14,35 +13,44 @@ import (
 )
 
 type User struct {
-    Name  string `json:"name"`
-    Email string `json:"email"`
-    Score int32 `json:"score"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Score int32  `json:"score"`
+	D1950 int32  `json:"d1950" bson:"d1950"`
+	D1960 int32  `json:"d1960" bson:"d1960"`
+	D1970 int32  `json:"d1970" bson:"d1970"`
+	D1980 int32  `json:"d1980" bson:"d1980"`
+	D1990 int32  `json:"d1990" bson:"d1990"`
+	D2000 int32  `json:"d2000" bson:"d2000"`
+	D2010 int32  `json:"d2010" bson:"d2010"`
+	D2020 int32  `json:"d2020" bson:"d2020"`
 }
-
 
 var userCollection *mongo.Collection
 
-// Initialize the user collection (MongoDB) and create index on the "score" field
+// Initialize the user collection and indexes.
 func InitUserCollection(client *mongo.Client) {
-    userCollection = client.Database("trivTunes").Collection("users")
+	userCollection = client.Database("trivTunes").Collection("users")
 
-    // Create an index on the "score" field in descending order
-    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-    // Define the index model for the "score" field
-    indexModel := mongo.IndexModel{
-        Keys: bson.D{{Key: "score", Value: -1}},  // Create an index on the "score" field (descending)
-        Options: options.Index().SetName("score_index"),
-    }
+	// Indexes for overall score and per-decade ranking
+	indexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "score", Value: -1}}, Options: options.Index().SetName("score_desc")},
+		{Keys: bson.D{{Key: "d1950", Value: -1}}},
+		{Keys: bson.D{{Key: "d1960", Value: -1}}},
+		{Keys: bson.D{{Key: "d1970", Value: -1}}},
+		{Keys: bson.D{{Key: "d1980", Value: -1}}},
+		{Keys: bson.D{{Key: "d1990", Value: -1}}},
+		{Keys: bson.D{{Key: "d2000", Value: -1}}},
+		{Keys: bson.D{{Key: "d2010", Value: -1}}},
+		{Keys: bson.D{{Key: "d2020", Value: -1}}},
+	}
 
-    // Create the index on the userCollection
-    indexName, err := userCollection.Indexes().CreateOne(ctx, indexModel)
-    if err != nil {
-        log.Fatal("Error creating index on score field: ", err)
-    }
-
-    log.Println("Index created: ", indexName)
+	if _, err := userCollection.Indexes().CreateMany(ctx, indexes); err != nil {
+		log.Fatal("Error creating indexes: ", err)
+	}
 }
 
 // UserHandler handles both GET and POST requests
@@ -57,133 +65,128 @@ func UserHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	case http.MethodPost:
 		handlePostUser(w, r)
-    case http.MethodPatch:
+	case http.MethodPatch:
 		handleUpdateUserScore(w, r)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 func handleGetUser(w http.ResponseWriter, r *http.Request) {
-    // Get the email from the query parameters
-    email := r.URL.Query().Get("email")
-    if email == "" {
-        http.Error(w, "Email is required", http.StatusBadRequest)
-        return
-    }
-    
-    // Create a context with a timeout
-    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-    defer cancel()
-    
-    // Assume userCollection is your MongoDB collection for users
-    var user User
-    err := userCollection.FindOne(ctx, bson.M{"email": email}).Decode(&user)
-    if err != nil {
-        if err == mongo.ErrNoDocuments {
-            w.WriteHeader(http.StatusNotFound)
-            json.NewEncoder(w).Encode(map[string]string{"message": "User not found"})
-        } else {
-            log.Printf("Error fetching user: %v", err)
-            http.Error(w, "Internal server error", http.StatusInternalServerError)
-        }
-        return
-    }
+	// Get the email from the query parameters
+	email := r.URL.Query().Get("email")
+	if email == "" {
+		http.Error(w, "Email is required", http.StatusBadRequest)
+		return
+	}
 
-    // Set the content type to JSON
-    w.Header().Set("Content-Type", "application/json")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-    // Encode the user to JSON and send the response
-    if err := json.NewEncoder(w).Encode(user); err != nil {
-        log.Printf("Error encoding user to JSON: %v", err)
-        http.Error(w, "Error encoding response", http.StatusInternalServerError)
-    }
+	var user User
+	err := userCollection.FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "User not found"})
+		} else {
+			log.Printf("Error fetching user: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if err := json.NewEncoder(w).Encode(user); err != nil {
+		log.Printf("Error encoding user to JSON: %v", err)
+		http.Error(w, "Error encoding response", http.StatusInternalServerError)
+	}
 }
 
 // Handle GET request to retrieve the top 50 users with the highest score from MongoDB
 func handleGetUsers(w http.ResponseWriter, r *http.Request) {
-    var users []User
+	var users []User
 
-    // Set a context for the MongoDB query
-    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-    // MongoDB query: Find all users, sort by score in descending order, and limit to 50
-    options := options.Find()
-    options.SetSort(bson.D{{Key: "score", Value: -1}}) // Sort by score descending
-    options.SetLimit(50)                   // Limit to 50 users
+	opts := options.Find().
+		SetSort(bson.D{{Key: "score", Value: -1}}).
+		SetLimit(50)
 
-    cursor, err := userCollection.Find(ctx, bson.D{}, options) // Empty filter (bson.D{}) to get all users
-    if err != nil {
-        log.Println("Error fetching users:", err)
-        http.Error(w, "Error fetching users from the database", http.StatusInternalServerError)
-        return
-    }
-    defer cursor.Close(ctx)
+	cursor, err := userCollection.Find(ctx, bson.D{}, opts)
+	if err != nil {
+		log.Println("Error fetching users:", err)
+		http.Error(w, "Error fetching users from the database", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
 
-    // Iterate through the cursor to decode each user document
-    for cursor.Next(ctx) {
-        var user User
-        if err := cursor.Decode(&user); err != nil {
-            log.Println("Error decoding user:", err)
-            http.Error(w, "Error decoding user data", http.StatusInternalServerError)
-            return
-        }
-        users = append(users, user)
-    }
+	for cursor.Next(ctx) {
+		var user User
+		if err := cursor.Decode(&user); err != nil {
+			log.Println("Error decoding user:", err)
+			http.Error(w, "Error decoding user data", http.StatusInternalServerError)
+			return
+		}
+		users = append(users, user)
+	}
 
-    // Check if the cursor encountered any errors
-    if err := cursor.Err(); err != nil {
-        log.Println("Cursor error:", err)
-        http.Error(w, "Cursor error", http.StatusInternalServerError)
-        return
-    }
+	if err := cursor.Err(); err != nil {
+		log.Println("Cursor error:", err)
+		http.Error(w, "Cursor error", http.StatusInternalServerError)
+		return
+	}
 
-    // Return the list of users as JSON
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(users)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(users)
 }
 
 func handlePostUser(w http.ResponseWriter, r *http.Request) {
-    var newUser User
+	var newUser User
 
-    // Read and parse the JSON body
-    if err := json.NewDecoder(r.Body).Decode(&newUser); err != nil {
-        http.Error(w, "Invalid JSON format", http.StatusBadRequest)
-        return
-    }
+	if err := json.NewDecoder(r.Body).Decode(&newUser); err != nil {
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		return
+	}
 
-    // Create context with timeout
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-    // Check if user already exists
-    var existingUser User
-    err := userCollection.FindOne(ctx, bson.M{"email": newUser.Email}).Decode(&existingUser)
+	var existingUser User
+	err := userCollection.FindOne(ctx, bson.M{"email": newUser.Email}).Decode(&existingUser)
+	if err == nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(existingUser)
+		return
+	} else if err != mongo.ErrNoDocuments {
+		log.Println("Error checking for existing user:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
 
-    if err == nil {
-        // User already exists, return the existing user
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(existingUser)
-        return
-    } else if err != mongo.ErrNoDocuments {
-        // An error occurred that wasn't "document not found"
-        log.Println("Error checking for existing user:", err)
-        http.Error(w, "Database error", http.StatusInternalServerError)
-        return
-    }
+	_, err = userCollection.InsertOne(ctx, bson.M{
+		"name":  newUser.Name,
+		"email": newUser.Email,
+		"score": newUser.Score,
+		"d1950": 0,
+		"d1960": 0,
+		"d1970": 0,
+		"d1980": 0,
+		"d1990": 0,
+		"d2000": 0,
+		"d2010": 0,
+		"d2020": 0,
+	})
+	if err != nil {
+		log.Println("Error inserting user:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
 
-    // User doesn't exist, insert new user into MongoDB
-    _, err = userCollection.InsertOne(ctx, newUser)
-    if err != nil {
-        log.Println("Error inserting user into MongoDB:", err)
-        http.Error(w, "Database error", http.StatusInternalServerError)
-        return
-    }
-
-    // Respond with the newly created user
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusCreated)
-    json.NewEncoder(w).Encode(newUser)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(newUser)
 }
 
 func handleUpdateUserScore(w http.ResponseWriter, r *http.Request) {
@@ -192,9 +195,12 @@ func handleUpdateUserScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var updateReq User
+	var updateReq struct {
+		Email  string `json:"email"`
+		Score  int32  `json:"score"`
+		Decade string `json:"decade,omitempty"`
+	}
 
-	// Read and parse the JSON body
 	if err := json.NewDecoder(r.Body).Decode(&updateReq); err != nil {
 		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
 		return
@@ -204,13 +210,15 @@ func handleUpdateUserScore(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Find the user and update their score
-	filter := bson.M{"email": updateReq.Email}
-	update := bson.M{"$set": bson.M{"score": updateReq.Score}}
+	decadeCol := mapDecadeToColumn(updateReq.Decade)
+	updateOps := bson.D{{Key: "$set", Value: bson.M{"score": updateReq.Score}}}
+	if decadeCol != "" {
+		updateOps = append(updateOps, bson.E{Key: "$inc", Value: bson.M{decadeCol: 1}})
+	}
 
 	var updatedUser User
-	err := userCollection.FindOneAndUpdate(ctx, filter, update, options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&updatedUser)
-
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	err := userCollection.FindOneAndUpdate(ctx, bson.M{"email": updateReq.Email}, updateOps, opts).Decode(&updatedUser)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			http.Error(w, "User not found", http.StatusNotFound)
@@ -221,9 +229,82 @@ func handleUpdateUserScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Respond with the updated user
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(updatedUser)
+	_ = json.NewEncoder(w).Encode(updatedUser)
 }
 
+func mapDecadeToColumn(decade string) string {
+	switch decade {
+	case "1950s":
+		return "d1950"
+	case "1960s":
+		return "d1960"
+	case "1970s":
+		return "d1970"
+	case "1980s":
+		return "d1980"
+	case "1990s":
+		return "d1990"
+	case "2000s":
+		return "d2000"
+	case "2010s":
+		return "d2010"
+	case "2020s":
+		return "d2020"
+	default:
+		return ""
+	}
+}
+
+// LeaderboardHandler returns top players overall and per-decade.
+func LeaderboardHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	decades := []string{"1950s", "1960s", "1970s", "1980s", "1990s", "2000s", "2010s", "2020s"}
+	decadeCols := []string{"d1950", "d1960", "d1970", "d1980", "d1990", "d2000", "d2010", "d2020"}
+
+	resp := struct {
+		Overall  []User            `json:"overall"`
+		ByDecade map[string][]User `json:"byDecade"`
+	}{
+		Overall:  []User{},
+		ByDecade: make(map[string][]User),
+	}
+
+	// Overall top 5 by score
+	if cur, err := userCollection.Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{Key: "score", Value: -1}}).SetLimit(5)); err == nil {
+		for cur.Next(ctx) {
+			var u User
+			if err := cur.Decode(&u); err == nil {
+				resp.Overall = append(resp.Overall, u)
+			}
+		}
+		cur.Close(ctx)
+	}
+
+	// Top 5 per decade
+	for i, dec := range decades {
+		col := decadeCols[i]
+		filter := bson.M{col: bson.M{"$gt": 0}}
+		opts := options.Find().
+			SetSort(bson.D{{Key: col, Value: -1}, {Key: "score", Value: -1}}).
+			SetLimit(5)
+
+		if cur, err := userCollection.Find(ctx, filter, opts); err == nil {
+			var list []User
+			for cur.Next(ctx) {
+				var u User
+				if err := cur.Decode(&u); err == nil {
+					list = append(list, u)
+				}
+			}
+			cur.Close(ctx)
+			resp.ByDecade[dec] = list
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
